@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Cat Aims At You</title>
+  <meta name="description" content="A 3D meme cat that points its gun at your face, using your front camera and face tracking. Runs entirely in your browser." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "@mediapipe/tasks-vision": "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs"
+      }
+    }
+  </script>
+</head>
+<body>
+  <canvas id="scene" aria-label="A cartoon cat pointing a gun at you"></canvas>
+
+  <div class="caption top" id="capTop">LET ME SEE YOU</div>
+  <div class="caption bottom" id="capBottom"></div>
+  <div id="flash" aria-hidden="true"></div>
+
+  <div id="intro" class="overlay">
+    <div class="card">
+      <h1>This cat wants a word.</h1>
+      <p>It needs your front camera to know where your face is, so it can aim at it.</p>
+      <p class="small">Everything runs on your device. No video is uploaded or stored.</p>
+      <div class="actions">
+        <button id="startBtn">Enable camera</button>
+        <button id="mouseBtn" class="ghost">Use mouse instead</button>
+      </div>
+      <p class="small status" id="introStatus" role="status"></p>
+    </div>
+  </div>
+
+  <div id="hud">
+    <span id="status" role="status"></span>
+    <button id="pipBtn" class="chip" hidden>Show camera</button>
+  </div>
+
+  <div id="pip" class="collapsed">
+    <video id="video" playsinline muted autoplay></video>
+    <canvas id="pipOverlay"></canvas>
+  </div>
+
+  <p id="hint">click · tap · space to fire</p>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
