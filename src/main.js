@@ -6,6 +6,7 @@ import { FaceTracker } from './tracker.js';
 import { OneEuroVec3 } from './filter.js';
 import { pew, unlockAudio } from './sfx.js';
 import { LevelSensor, detectDeviceKind, tiltFromFaceMatrix } from './level.js';
+import { CameraView } from './camView.js';
 
 // World space = physical meters, origin at the centre of the screen,
 // +x right, +y up along the screen, +z out of the screen toward the viewer.
@@ -22,7 +23,7 @@ const ui = {
   mouseBtn: $('mouseBtn'),
   introStatus: $('introStatus'),
   status: $('status'),
-  pipBtn: $('pipBtn'),
+  camMode: $('camMode'),
   pip: $('pip'),
   video: $('video'),
   pipOverlay: $('pipOverlay'),
@@ -231,35 +232,16 @@ function updateCaptions(t, faceVisible) {
   if (mode === 'face' && !faceVisible) return setCaption("WHERE'D YOU GO", 'I KNOW YOU\'RE THERE');
   if (eye.z < 0.25) return setCaption('BACK UP', 'PERSONAL SPACE PLEASE');
   if (speed > 0.35) return setCaption("I SAID DON'T MOVE");
+  if (camView.mode === 'mugshot') return setCaption('SUSPECT IDENTIFIED', 'HANDS WHERE I CAN SEE THEM');
   if (shotsFired > 0 && t % 8 < 2) return setCaption('THAT WAS A WARNING SHOT');
   setCaption("DON'T MOVE", mode === 'pointer' ? 'MOUSE MODE' : '');
 }
 
-// ---------- camera preview overlay ----------
-const pipCtx = ui.pipOverlay.getContext('2d');
-function drawPip() {
-  if (ui.pip.classList.contains('collapsed')) return;
-  const c = ui.pipOverlay;
-  const w = (c.width = c.clientWidth * devicePixelRatio);
-  const h = (c.height = c.clientHeight * devicePixelRatio);
-  pipCtx.clearRect(0, 0, w, h);
-  if (!faceRaw) return;
-  // Canvas is CSS-mirrored like the video, so draw in raw image coordinates.
-  const x = faceRaw.u * w;
-  const y = faceRaw.v * h;
-  pipCtx.strokeStyle = '#ff3355';
-  pipCtx.lineWidth = 2 * devicePixelRatio;
-  pipCtx.beginPath();
-  pipCtx.arc(x, y, 14 * devicePixelRatio, 0, Math.PI * 2);
-  pipCtx.moveTo(x - 24 * devicePixelRatio, y); pipCtx.lineTo(x + 24 * devicePixelRatio, y);
-  pipCtx.moveTo(x, y - 24 * devicePixelRatio); pipCtx.lineTo(x, y + 24 * devicePixelRatio);
-  pipCtx.stroke();
-}
-
-ui.pipBtn.addEventListener('click', () => {
-  const collapsed = ui.pip.classList.toggle('collapsed');
-  ui.pipBtn.textContent = collapsed ? 'Show camera' : 'Hide camera';
-});
+// ---------- camera preview (live / mugshot / tracking data) ----------
+const camView = new CameraView({ video: ui.video, canvas: ui.pipOverlay, container: ui.pip });
+ui.camMode.addEventListener('change', () => camView.setMode(ui.camMode.value));
+ui.camMode.addEventListener('pointerdown', (e) => e.stopPropagation());
+const drawPip = () => camView.draw(faceRaw, { lidTiltDeg: deviceKind === 'laptop' ? level.tiltDeg : null, lidSource: level.source });
 
 // ---------- level / tilt panel ----------
 function renderLevelPanel() {
@@ -313,7 +295,7 @@ ui.startBtn.addEventListener('click', async () => {
     await Promise.all([cam, tracker.loadModel()]);
     mode = 'face';
     ui.intro.hidden = true;
-    ui.pipBtn.hidden = false;
+    ui.camMode.hidden = false;
   } catch (err) {
     console.error(err);
     const denied = err?.name === 'NotAllowedError';
@@ -342,6 +324,7 @@ function frame() {
 
   if (mode === 'face' && tracker.update(now)) {
     faceRaw = tracker.face;
+    camView.noteDetection(now);
     if (faceRaw) {
       const off = webcamOffset();
       eyeFilter.filter(faceRaw.x + off.x, faceRaw.y + off.y, faceRaw.z, now, eye);
@@ -393,4 +376,16 @@ function frame() {
 requestAnimationFrame(frame);
 
 // Handy for debugging in the console
-window.__cat = { CONFIG, eye, screen, tracker, level, gravity, deviceKind };
+window.__cat = {
+  CONFIG, eye, screen, tracker, level, gravity, deviceKind, camView,
+  /** Debug: run face tracking on any MediaStream (e.g. a canvas) instead of the webcam. */
+  async useStream(stream) {
+    ui.video.srcObject = stream;
+    await ui.video.play();
+    await tracker.loadModel();
+    mode = 'face';
+    ui.intro.hidden = true;
+    ui.camMode.hidden = false;
+    ui.levelBtn.hidden = false;
+  },
+};

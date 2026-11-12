@@ -40,7 +40,12 @@
 
   <div id="hud">
     <span id="status" role="status"></span>
-    <button id="pipBtn" class="chip" hidden>Show camera</button>
+    <select id="camMode" class="chip" aria-label="Camera preview" hidden>
+      <option value="off">Camera: off</option>
+      <option value="live">Camera: live</option>
+      <option value="mugshot">Camera: mugshot</option>
+      <option value="data">Camera: tracking data</option>
+    </select>
     <button id="levelBtn" class="chip" hidden>Level</button>
   </div>
 

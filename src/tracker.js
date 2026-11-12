@@ -37,6 +37,7 @@ export class FaceTracker {
         runningMode: 'VIDEO',
         numFaces: 1,
         outputFacialTransformationMatrixes: true, // head pose, used to estimate the laptop lid angle
+        outputFaceBlendshapes: true, // expression values, shown in the tracking-data view
       });
     try {
       this.landmarker = await make('GPU');
@@ -60,6 +61,8 @@ export class FaceTracker {
     }
     this.face = this.#estimate(lm, v.videoWidth, v.videoHeight);
     this.face.poseMatrix = res.facialTransformationMatrixes?.[0]?.data ?? null;
+    this.face.landmarks = lm;
+    this.face.blendshapes = res.faceBlendshapes?.[0]?.categories ?? [];
     return true;
   }
 
@@ -82,6 +85,6 @@ export class FaceTracker {
     const x = (-(cx - W / 2) * z) / f;
     const y = (-(cy - H / 2) * z) / f;
 
-    return { x, y, z, u: cx / W, v: cy / H };
+    return { x, y, z, u: cx / W, v: cy / H, ipdPx, focalPx: f };
   }
 }
