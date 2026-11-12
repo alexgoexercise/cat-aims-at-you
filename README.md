@@ -21,7 +21,7 @@ A 3D cartoon cat that tracks your face through the front camera and keeps its gu
 - **Private** – runs entirely in the browser. Video never leaves the device.
 - **No build step** – plain HTML and ES modules, with Three.js and MediaPipe loaded from a CDN.
 
-Click, tap or press space to fire. If you'd rather not use the camera, there's a mouse mode.
+Blink to fire. Both eyes have to close, so winks are ignored (`src/blink.js`). Without the camera, mouse mode fires with a click, a tap or the space bar.
 
 ## Run locally
 

@@ -8,6 +8,7 @@ import { pew, unlockAudio } from './sfx.js';
 import { LevelSensor, detectDeviceKind, tiltFromFaceMatrix } from './level.js';
 import { CameraView } from './camView.js';
 import { createThirdPerson } from './thirdPerson.js';
+import { BlinkDetector } from './blink.js';
 
 // World space = physical meters, origin at the centre of the screen,
 // +x right, +y up along the screen, +z out of the screen toward the viewer.
@@ -25,6 +26,7 @@ const ui = {
   introStatus: $('introStatus'),
   status: $('status'),
   camMode: $('camMode'),
+  hint: $('hint'),
   viewBtn: $('viewBtn'),
   pip: $('pip'),
   video: $('video'),
@@ -212,10 +214,13 @@ function fire() {
   shotsFired++;
 }
 let shotsFired = 0;
+// With the camera on, the cat fires when you blink (see the main loop).
+// Mouse mode keeps click / tap / space.
+const blink = new BlinkDetector();
 // Window view: fire on press. Third-person view: fire on a click that wasn't an orbit drag.
 let pressAt = null;
 ui.canvas.addEventListener('pointerdown', (e) => {
-  if (mode === 'idle') return;
+  if (mode !== 'pointer') return;
   if (view === 'third') {
     pressAt = { x: e.clientX, y: e.clientY, t: performance.now() };
     return;
@@ -224,13 +229,13 @@ ui.canvas.addEventListener('pointerdown', (e) => {
   fire();
 });
 ui.canvas.addEventListener('pointerup', (e) => {
-  if (view !== 'third' || !pressAt || mode === 'idle') return;
+  if (view !== 'third' || !pressAt || mode !== 'pointer') return;
   const moved = Math.hypot(e.clientX - pressAt.x, e.clientY - pressAt.y);
   if (moved < 6 && performance.now() - pressAt.t < 400) fire();
   pressAt = null;
 });
 window.addEventListener('keydown', (e) => {
-  if (e.code === 'Space' && mode !== 'idle') {
+  if (e.code === 'Space' && mode === 'pointer') {
     e.preventDefault();
     fire();
   }
@@ -365,6 +370,7 @@ function frame() {
   if (mode === 'face' && tracker.update(now)) {
     faceRaw = tracker.face;
     camView.noteDetection(now);
+    if (faceRaw && blink.update(faceRaw.blendshapes, now)) fire();
     if (faceRaw) {
       const off = webcamOffset();
       eyeFilter.filter(faceRaw.x + off.x, faceRaw.y + off.y, faceRaw.z, now, eye);
@@ -400,6 +406,9 @@ function frame() {
     if (level.manualTilt == null) ui.tiltRange.value = tilt;
     if (prevSource !== level.source) renderLevelPanel();
   }
+
+  const hint = mode === 'face' ? 'blink to fire · V to switch view' : 'click · tap · space to fire · V to switch view';
+  if (ui.hint.textContent !== hint) ui.hint.textContent = hint;
 
   ui.status.textContent =
     mode === 'face'
