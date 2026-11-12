@@ -18,6 +18,10 @@ export const CONFIG = {
   // Where we assume your eyes are before / without tracking (meters from screen center).
   defaultEyeDistance: num('dist', isTouch ? 0.35 : 0.55),
 
+  // Laptop lid tilt back from vertical, in degrees. Leave null to estimate it
+  // automatically; ?tilt=20 forces a value.
+  manualTiltDeg: params.has('tilt') ? num('tilt', null) : null,
+
   // Head-coupled perspective: the 3D scene behaves like a window you look through.
   headCoupledPerspective: params.get('parallax') !== '0',
 

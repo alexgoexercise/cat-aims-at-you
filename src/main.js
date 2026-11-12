@@ -5,9 +5,11 @@ import { createRoom } from './room.js';
 import { FaceTracker } from './tracker.js';
 import { OneEuroVec3 } from './filter.js';
 import { pew, unlockAudio } from './sfx.js';
+import { LevelSensor, detectDeviceKind, tiltFromFaceMatrix } from './level.js';
 
 // World space = physical meters, origin at the centre of the screen,
-// +x right, +y up, +z out of the screen toward the viewer.
+// +x right, +y up along the screen, +z out of the screen toward the viewer.
+// The room and cat live in a child "gravity" group whose +y is real-world up.
 
 const $ = (id) => document.getElementById(id);
 const ui = {
@@ -24,7 +26,18 @@ const ui = {
   pip: $('pip'),
   video: $('video'),
   pipOverlay: $('pipOverlay'),
+  levelBtn: $('levelBtn'),
+  levelPanel: $('levelPanel'),
+  tiltRow: $('tiltRow'),
+  tiltRange: $('tiltRange'),
+  tiltOut: $('tiltOut'),
+  tiltAuto: $('tiltAuto'),
+  motionBtn: $('motionBtn'),
+  levelNote: $('levelNote'),
 };
+
+const deviceKind = detectDeviceKind();
+const level = new LevelSensor({ kind: deviceKind, manualTiltDeg: CONFIG.manualTiltDeg });
 
 // ---------- renderer / scene ----------
 const renderer = new THREE.WebGLRenderer({ canvas: ui.canvas, antialias: true });
@@ -32,6 +45,7 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.localClippingEnabled = true;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x1b1430);
@@ -44,42 +58,98 @@ const sun = new THREE.DirectionalLight(0xffffff, 2.4);
 sun.castShadow = true;
 sun.shadow.mapSize.set(1024, 1024);
 sun.shadow.bias = -0.0005;
-scene.add(sun, sun.target);
+
+// Everything that should obey real-world gravity hangs off this group.
+const gravity = new THREE.Group();
+scene.add(gravity);
+gravity.add(sun, sun.target);
 
 const cat = createCat();
-scene.add(cat.root);
+gravity.add(cat.root);
 
-const screen = { w: 0.3, h: 0.2, depth: 0.25 };
+// Only keep room geometry behind the glass (screen-space z <= 0).
+const screenClip = [new THREE.Plane(new THREE.Vector3(0, 0, -1), 0)];
+
+const screen = { w: 0.3, h: 0.2 };
 let room = null;
+let layoutKey = '';
 
 function resize() {
   const w = window.innerWidth;
   const h = window.innerHeight;
   renderer.setSize(w, h, false);
-
   screen.w = w * CONFIG.metersPerCssPixel;
   screen.h = h * CONFIG.metersPerCssPixel;
-  screen.depth = Math.max(screen.w, screen.h) * 0.8;
-
-  if (room) {
-    scene.remove(room.group);
-    room.dispose();
-  }
-  room = createRoom(screen.w, screen.h, screen.depth);
-  scene.add(room.group);
-
-  const s = Math.min((0.62 * screen.h) / cat.height, (0.7 * screen.w) / cat.width);
-  cat.root.scale.setScalar(s);
-  cat.root.position.set(0, -screen.h / 2 - cat.minY * s, -screen.depth * 0.45);
-
-  const m = Math.max(screen.w, screen.h);
-  sun.position.set(m * 0.4, m * 0.9, m * 0.6);
-  sun.target.position.set(0, -screen.h / 2, -screen.depth * 0.45);
-  Object.assign(sun.shadow.camera, { left: -m, right: m, top: m, bottom: -m, near: 0.001, far: m * 4 });
-  sun.shadow.camera.updateProjectionMatrix();
+  layoutKey = ''; // force a rebuild
 }
 window.addEventListener('resize', resize);
+window.screen.orientation?.addEventListener?.('change', resize);
 resize();
+
+/**
+ * Place the gravity group so its floor is level with the real world:
+ * - laptop: the floor plane runs through the hinge, i.e. level with the keyboard;
+ * - phone: the floor stays parallel to the horizon and sits at the lowest point of the screen.
+ */
+const _q = new THREE.Quaternion();
+const _lx = new THREE.Vector3();
+const _lz = new THREE.Vector3();
+const _corner = new THREE.Vector3();
+const Y = new THREE.Vector3(0, 1, 0);
+
+function layoutWorld(up) {
+  _q.setFromUnitVectors(Y, up);
+  _lx.set(1, 0, 0).applyQuaternion(_q);
+  _lz.set(0, 0, 1).applyQuaternion(_q);
+
+  // Heights (along real "up") and sideways extents of the four screen corners.
+  let minH = Infinity, maxH = -Infinity, halfW = 0;
+  for (const sx of [-1, 1]) {
+    for (const sy of [-1, 1]) {
+      _corner.set((sx * screen.w) / 2, (sy * screen.h) / 2, 0);
+      const hgt = _corner.dot(up);
+      minH = Math.min(minH, hgt);
+      maxH = Math.max(maxH, hgt);
+      halfW = Math.max(halfW, Math.abs(_corner.dot(_lx)));
+    }
+  }
+  // Laptops: the keyboard deck sits about a bezel below the visible screen edge.
+  const floorH = minH - (deviceKind === 'laptop' ? 0.012 : 0);
+  const ceil = maxH - floorH;
+  const m = Math.max(screen.w, screen.h);
+  const depth = m * 0.8;
+
+  gravity.quaternion.copy(_q);
+  gravity.position.copy(up).multiplyScalar(floorH); // point on the floor plane under the screen centre
+
+  // Rebuild the room only when the geometry meaningfully changes.
+  const key = [halfW, ceil, depth].map((v) => v.toFixed(3)).join('|');
+  if (key !== layoutKey) {
+    layoutKey = key;
+    if (room) {
+      gravity.remove(room.group);
+      room.dispose();
+    }
+    room = createRoom({ halfW, ceil, zBack: -depth, zFront: m, clippingPlanes: screenClip });
+    gravity.add(room.group);
+  }
+
+  // Cat: standing on the floor, scaled to fit, and fully behind the glass.
+  const s = Math.min((0.62 * screen.h) / cat.height, (0.7 * screen.w) / cat.width, (0.8 * ceil) / cat.height);
+  cat.root.scale.setScalar(s);
+  const catH = cat.height * s;
+  const margin = 0.01;
+  // screen-space z of a gravity-space point (x, y, z) = gravity.z + y*up.z + z*lz.z
+  const zFrontLimit = (-margin - gravity.position.z - catH * up.z) / Math.max(_lz.z, 0.2) - 0.9 * s;
+  const zCat = THREE.MathUtils.clamp(Math.min(-depth * 0.45, zFrontLimit), -depth + 1.3 * s, 0);
+  cat.root.position.set(0, -cat.minY * s, zCat);
+
+  sun.position.set(m * 0.4, ceil + m * 0.9, zCat + m * 0.6);
+  sun.target.position.set(0, 0, zCat);
+  Object.assign(sun.shadow.camera, { left: -m, right: m, top: m, bottom: -m, near: 0.001, far: m * 4 });
+  sun.shadow.camera.updateProjectionMatrix();
+  gravity.updateMatrixWorld(true);
+}
 
 /**
  * Off-axis ("window") projection: the camera sits where your eyes are and the
@@ -191,9 +261,50 @@ ui.pipBtn.addEventListener('click', () => {
   ui.pipBtn.textContent = collapsed ? 'Show camera' : 'Hide camera';
 });
 
+// ---------- level / tilt panel ----------
+function renderLevelPanel() {
+  const laptop = deviceKind === 'laptop';
+  ui.tiltRow.hidden = !laptop;
+  ui.motionBtn.hidden = !(level.needsPermission && !laptop);
+  const auto = level.manualTilt == null;
+  ui.tiltAuto.checked = auto;
+  ui.tiltRange.disabled = auto;
+  ui.levelNote.textContent = laptop
+    ? {
+        sensor: 'Using this laptop’s motion sensor.',
+        face: 'Estimated from your head pose (assumes your head is upright). Untick Auto to set it by hand.',
+        manual: 'Set by hand. The floor lines up with your keyboard at this lid angle.',
+        default: 'Enable the camera to estimate it, or untick Auto to set it by hand.',
+      }[level.source]
+    : level.source === 'sensor'
+      ? 'Using the gravity sensor: the floor stays level with the horizon.'
+      : 'No motion data yet. Tap the button to allow the motion sensor.';
+}
+
+ui.levelBtn.addEventListener('click', () => {
+  ui.levelPanel.hidden = !ui.levelPanel.hidden;
+  renderLevelPanel();
+});
+ui.tiltAuto.addEventListener('change', () => {
+  level.setManualTilt(ui.tiltAuto.checked ? null : +ui.tiltRange.value);
+  renderLevelPanel();
+});
+ui.tiltRange.addEventListener('input', () => {
+  level.setManualTilt(+ui.tiltRange.value);
+  renderLevelPanel();
+});
+ui.motionBtn.addEventListener('click', async () => {
+  await level.requestPermission();
+  renderLevelPanel();
+});
+// Don't let clicks on the panel fire the gun.
+ui.levelPanel.addEventListener('pointerdown', (e) => e.stopPropagation());
+
 // ---------- start flow ----------
 ui.startBtn.addEventListener('click', async () => {
   unlockAudio();
+  if (deviceKind === 'mobile') level.requestPermission(); // must start inside the tap on iOS
+  ui.levelBtn.hidden = false;
   ui.startBtn.disabled = ui.mouseBtn.disabled = true;
   try {
     ui.introStatus.textContent = 'Asking for camera access…';
@@ -215,6 +326,8 @@ ui.startBtn.addEventListener('click', async () => {
 
 ui.mouseBtn.addEventListener('click', () => {
   unlockAudio();
+  if (deviceKind === 'mobile') level.requestPermission();
+  ui.levelBtn.hidden = false;
   mode = 'pointer';
   ui.intro.hidden = true;
 });
@@ -233,6 +346,7 @@ function frame() {
       const off = webcamOffset();
       eyeFilter.filter(faceRaw.x + off.x, faceRaw.y + off.y, faceRaw.z, now, eye);
       lastFaceSeen = t;
+      if (deviceKind === 'laptop') level.addFaceSample(tiltFromFaceMatrix(faceRaw.poseMatrix), dt);
     } else if (t - lastFaceSeen > 0.5) {
       eyeFilter.reset();
     }
@@ -249,10 +363,20 @@ function frame() {
   speed += (instSpeed - speed) * (1 - Math.exp(-dt * 4));
   prevEye.copy(eye);
 
+  const prevSource = level.source;
+  layoutWorld(level.update(dt));
   updateCamera(CONFIG.headCoupledPerspective && mode !== 'pointer' ? eye : defaultEye);
   cat.update(dt, t, eye);
   updateCaptions(t, faceVisible);
   drawPip();
+
+  const tilt = Math.round(level.tiltDeg);
+  ui.levelBtn.textContent = deviceKind === 'laptop' ? `Lid tilt ${tilt}°` : level.source === 'sensor' ? 'Level: gravity' : 'Level';
+  if (!ui.levelPanel.hidden) {
+    ui.tiltOut.textContent = `${tilt}° (hinge ≈ ${90 + tilt}°)`;
+    if (level.manualTilt == null) ui.tiltRange.value = tilt;
+    if (prevSource !== level.source) renderLevelPanel();
+  }
 
   ui.status.textContent =
     mode === 'face'
@@ -269,4 +393,4 @@ function frame() {
 requestAnimationFrame(frame);
 
 // Handy for debugging in the console
-window.__cat = { CONFIG, eye, screen, tracker };
+window.__cat = { CONFIG, eye, screen, tracker, level, gravity, deviceKind };

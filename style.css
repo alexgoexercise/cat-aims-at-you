@@ -113,6 +113,27 @@ button.chip { padding: 6px 10px; font-size: 12px; border-radius: 999px; backgrou
   z-index: 5;
 }
 
+.panel {
+  position: fixed;
+  left: 12px;
+  bottom: calc(max(12px, env(safe-area-inset-bottom)) + 40px);
+  width: min(280px, calc(100vw - 24px));
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--card);
+  border: 1px solid rgba(255, 79, 216, 0.35);
+  font-size: 13px;
+  color: var(--ink);
+  z-index: 6;
+}
+.panel[hidden] { display: none; }
+.panel .row { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.panel output { color: #ffd36e; font-variant-numeric: tabular-nums; }
+.panel input[type="range"] { width: 100%; accent-color: var(--accent); }
+.panel .check { display: flex; align-items: center; gap: 6px; margin-top: 4px; color: var(--muted); }
+.panel .note { margin: 8px 0 0; font-size: 12px; line-height: 1.4; color: var(--muted); }
+[hidden] { display: none !important; }
+
 #hint {
   position: fixed;
   right: 12px;

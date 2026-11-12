@@ -41,6 +41,20 @@
   <div id="hud">
     <span id="status" role="status"></span>
     <button id="pipBtn" class="chip" hidden>Show camera</button>
+    <button id="levelBtn" class="chip" hidden>Level</button>
+  </div>
+
+  <div id="levelPanel" class="panel" hidden>
+    <div id="tiltRow">
+      <div class="row">
+        <span>Laptop lid tilt</span>
+        <output id="tiltOut"></output>
+      </div>
+      <input id="tiltRange" type="range" min="-10" max="55" step="1" value="15" aria-label="Lid tilt back from vertical, in degrees" />
+      <label class="check"><input id="tiltAuto" type="checkbox" checked /> Auto</label>
+    </div>
+    <button id="motionBtn" class="chip" hidden>Allow motion sensor</button>
+    <p id="levelNote" class="note"></p>
   </div>
 
   <div id="pip" class="collapsed">

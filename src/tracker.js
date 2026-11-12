@@ -36,6 +36,7 @@ export class FaceTracker {
         baseOptions: { modelAssetPath: modelUrl, delegate },
         runningMode: 'VIDEO',
         numFaces: 1,
+        outputFacialTransformationMatrixes: true, // head pose, used to estimate the laptop lid angle
       });
     try {
       this.landmarker = await make('GPU');
@@ -58,6 +59,7 @@ export class FaceTracker {
       return true;
     }
     this.face = this.#estimate(lm, v.videoWidth, v.videoHeight);
+    this.face.poseMatrix = res.facialTransformationMatrixes?.[0]?.data ?? null;
     return true;
   }
 
