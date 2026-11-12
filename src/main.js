@@ -219,22 +219,55 @@ let shotsFired = 0;
 // Mouse mode keeps click / tap / space.
 const blink = new BlinkDetector();
 let faceExpr = null; // latest face expression mapped for the cat (see mimic.js)
-// Window view: fire on press. Third-person view: fire on a click that wasn't an orbit drag.
+// ---------- clicking the cat ----------
+// Clicking a body part makes the cat react (see REACTIONS in cat.js). Clicking
+// anywhere else fires in mouse mode. A sneeze can set the gun off too.
+cat.onSneeze = () => fire();
+const raycaster = new THREE.Raycaster();
+raycaster.params.Line.threshold = 0.0005; // whiskers shouldn't have a huge hit area
+const _ndc = new THREE.Vector2();
+let reactionCaption_ = null;
+let reactionUntil = 0;
+
+function partUnder(e) {
+  const r = ui.canvas.getBoundingClientRect();
+  _ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  raycaster.setFromCamera(_ndc, view === 'third' ? third.camera : camera);
+  return cat.partAt(raycaster);
+}
+
+function handleClick(e) {
+  const part = partUnder(e);
+  if (part) {
+    const { caption, duration } = cat.react(part);
+    reactionCaption_ = caption;
+    reactionUntil = performance.now() + duration * 1000;
+  } else if (mode === 'pointer') {
+    fire();
+  }
+}
+
+// Window view: act on press. Third-person view: act on a click that wasn't an orbit drag.
 let pressAt = null;
 ui.canvas.addEventListener('pointerdown', (e) => {
-  if (mode !== 'pointer') return;
+  if (mode === 'idle') return;
   if (view === 'third') {
     pressAt = { x: e.clientX, y: e.clientY, t: performance.now() };
     return;
   }
   e.preventDefault();
-  fire();
+  handleClick(e);
 });
 ui.canvas.addEventListener('pointerup', (e) => {
-  if (view !== 'third' || !pressAt || mode !== 'pointer') return;
+  if (view !== 'third' || !pressAt || mode === 'idle') return;
   const moved = Math.hypot(e.clientX - pressAt.x, e.clientY - pressAt.y);
-  if (moved < 6 && performance.now() - pressAt.t < 400) fire();
+  if (moved < 6 && performance.now() - pressAt.t < 400) handleClick(e);
   pressAt = null;
+});
+// Pointer cursor over the cat
+ui.canvas.addEventListener('pointermove', (e) => {
+  if (mode === 'idle' || e.buttons) return;
+  ui.canvas.style.cursor = partUnder(e) ? 'pointer' : '';
 });
 window.addEventListener('keydown', (e) => {
   if (e.code === 'Space' && mode === 'pointer') {
@@ -273,6 +306,7 @@ function setCaption(top, bottom = '') {
 
 function updateCaptions(t, faceVisible) {
   if (mode === 'idle') return setCaption('LET ME SEE YOU');
+  if (reactionCaption_ && performance.now() < reactionUntil) return setCaption(...reactionCaption_);
   if (mode === 'face' && !faceVisible) return setCaption("WHERE'D YOU GO", 'I KNOW YOU\'RE THERE');
   if (eye.z < 0.25) return setCaption('BACK UP', 'PERSONAL SPACE PLEASE');
   if (speed > 0.35) return setCaption("I SAID DON'T MOVE");

@@ -19,6 +19,7 @@ const MAT = {
   black: new THREE.MeshBasicMaterial({ color: 0x111111 }),
   mouth: new THREE.MeshBasicMaterial({ color: 0x3a0f16 }),
   lips: toon(0xe0566e),
+  hitbox: new THREE.MeshBasicMaterial({ visible: false }), // invisible, but still clickable
   shine: new THREE.MeshBasicMaterial({ color: 0xffffff }),
   gun: toon(0x34343e),
   gunDark: toon(0x1a1a20),
@@ -38,13 +39,18 @@ const sphere = (r = 1) => new THREE.SphereGeometry(r, 32, 24);
 
 function buildHead() {
   const head = new THREE.Group();
+  head.userData.part = 'head'; // clickable parts are tagged; the nearest tagged ancestor wins
   head.add(mesh(sphere(0.8), MAT.fur, { scale: [1.15, 0.95, 1] }));
 
-  // Ears
+  // Ears (index 0 = left of the screen)
+  const ears = [];
   for (const s of [-1, 1]) {
     const ear = mesh(new THREE.ConeGeometry(0.3, 0.6, 24), MAT.fur, { pos: [0.5 * s, 0.62, -0.05], rot: [0, 0, -0.4 * s] });
     ear.add(mesh(new THREE.ConeGeometry(0.17, 0.38, 24), MAT.pink, { pos: [0, -0.06, 0.14], scale: [1, 1, 0.5] }));
+    ear.userData.part = s < 0 ? 'earL' : 'earR';
+    ear.userData.baseRotZ = ear.rotation.z;
     head.add(ear);
+    ears.push(ear);
   }
 
   // Forehead tabby stripes
@@ -85,8 +91,14 @@ function buildHead() {
     head.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0x222222 })));
   }
 
-  // Nose
-  head.add(mesh(sphere(0.07), MAT.pink, { pos: [0, -0.1, 0.82], scale: [1.3, 0.9, 0.8] }));
+  // Nose, with a larger invisible hit area so it's easy to boop
+  const nose = mesh(sphere(0.07), MAT.pink, { pos: [0, -0.1, 0.82], scale: [1.3, 0.9, 0.8] });
+  nose.userData.part = 'nose';
+  head.add(nose);
+  const noseHit = new THREE.Mesh(sphere(0.13), MAT.hitbox);
+  noseHit.position.set(0, -0.1, 0.84);
+  noseHit.userData.part = 'nose';
+  head.add(noseHit);
 
   // Mouth shapes, blended by the expression values
   const arc = new THREE.TorusGeometry(0.08, 0.016, 8, 20, Math.PI);
@@ -103,7 +115,7 @@ function buildHead() {
   pucker.add(mesh(new THREE.CircleGeometry(0.045, 20), MAT.mouth, { pos: [0, 0, 0.01] }));
   head.add(frown, smile, open, pucker);
 
-  return { head, eyes, rig: { eyes, brows, cheeks, frown, smile, open, pucker } };
+  return { head, eyes, ears, nose, rig: { eyes, brows, cheeks, frown, smile, open, pucker } };
 }
 
 function buildGun() {
@@ -141,15 +153,22 @@ function buildGun() {
 }
 
 export function createCat() {
-  const root = new THREE.Group();
+  const root = new THREE.Group(); // placed by main.js
+  const body = new THREE.Group(); // everything, so the cat can hop
+  root.add(body);
   const torso = new THREE.Group(); // yaws a little toward the target
-  root.add(torso);
+  torso.userData.part = 'body';
+  body.add(torso);
 
   // Body
   torso.add(mesh(sphere(1), MAT.fur, { scale: [0.85, 1, 0.75] }));
-  torso.add(mesh(sphere(1), MAT.white, { pos: [0, -0.15, 0.4], scale: [0.55, 0.7, 0.4] }));
+  const belly = mesh(sphere(1), MAT.white, { pos: [0, -0.15, 0.4], scale: [0.55, 0.7, 0.4] });
+  belly.userData.part = 'belly';
+  torso.add(belly);
   for (const s of [-1, 1]) {
-    root.add(mesh(sphere(1), MAT.white, { pos: [0.42 * s, -0.98, 0.3], scale: [0.28, 0.17, 0.38] }));
+    const foot = mesh(sphere(1), MAT.white, { pos: [0.42 * s, -0.98, 0.3], scale: [0.28, 0.17, 0.38] });
+    foot.userData.part = 'feet';
+    body.add(foot);
   }
 
   // Tail
@@ -163,13 +182,15 @@ export function createCat() {
     new THREE.Vector3(0.6, 1.5, -0.3),
   ]);
   tail.add(mesh(new THREE.TubeGeometry(curve, 48, 0.11, 12), MAT.fur));
+  tail.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 24, 0.24, 8), MAT.hitbox)); // easier to click
   tail.add(mesh(sphere(0.11), MAT.stripe, { pos: [0.6, 1.5, -0.3] }));
-  root.add(tail);
+  tail.userData.part = 'tail';
+  body.add(tail);
 
   // Head on a neck pivot
   const neck = new THREE.Group();
   neck.position.set(0, 1.0, 0);
-  const { head, eyes, rig } = buildHead();
+  const { head, eyes, ears, nose, rig } = buildHead();
   head.position.y = 0.3;
   neck.add(head);
   torso.add(neck);
@@ -180,6 +201,17 @@ export function createCat() {
   const { gun, muzzle, flash, light, grips } = buildGun();
   const GUN_REST_Z = 0.95;
   gun.position.z = GUN_REST_Z;
+  gun.userData.part = 'gun';
+  // The model sits in a "spinner" pivoting at the trigger guard, so it can do a
+  // trick spin while the paws (which follow `gun`) stay put.
+  const spinner = new THREE.Group();
+  spinner.position.y = -0.12;
+  while (gun.children.length) {
+    const c = gun.children[0];
+    c.position.y += 0.12;
+    spinner.add(c);
+  }
+  gun.add(spinner);
   gunPivot.add(gun);
   torso.add(gunPivot);
 
@@ -221,10 +253,13 @@ export function createCat() {
     return obj.visible;
   };
 
-  function applyExpression(dt, autoBlink) {
+  function applyExpression(dt, autoBlink, overlay, overlayAmount) {
     const a = 1 - Math.exp(-dt * 18);
     for (const k of EXPR_KEYS) expr[k] += (exprTarget[k] - expr[k]) * a;
-    const { eyeL, eyeR, jaw, smile, browUp, browDown, puff, pucker, roll } = expr;
+    // A click reaction can push expressions on top of whatever the face is doing.
+    const eff = { ...expr };
+    if (overlay) for (const k in overlay) eff[k] = Math.max(eff[k], overlay[k] * overlayAmount);
+    const { eyeL, eyeR, jaw, smile, browUp, browDown, puff, pucker, roll } = eff;
 
     // Head tilt (roll), on top of the neck that keeps the face pointed at you
     head.rotation.z = roll;
@@ -311,14 +346,126 @@ export function createCat() {
     nextBlink -= dt;
     if (nextBlink <= 0) { blinkT = 0.14; nextBlink = 2 + Math.random() * 4; }
     blinkT = Math.max(0, blinkT - dt);
-    applyExpression(dt, !faceDriven && blinkT > 0 ? 1 : 0);
+
+    const { overlay, amount } = animateReaction(dt);
+    applyExpression(dt, !faceDriven && blinkT > 0 ? 1 : 0, overlay, amount);
   }
 
   function fire() {
     recoil = 1;
   }
 
+  // --- click reactions ---
+  const REACTIONS = {
+    head: { dur: 1.1, caption: ['...FINE. ONE PAT.', ''], expr: { eyeL: 1, eyeR: 1, smile: 1 } },
+    nose: { dur: 1.2, caption: ['ACHOO', "THAT ONE'S ON YOU"], expr: { eyeL: 1, eyeR: 1, browUp: 0.8 } },
+    earL: { dur: 0.7, caption: ['WHAT?', ''], expr: { browUp: 0.7 } },
+    earR: { dur: 0.7, caption: ['WHAT?', ''], expr: { browUp: 0.7 } },
+    belly: { dur: 1.4, caption: ['NOT THE BELLY', ''], expr: { eyeL: 1, eyeR: 1, smile: 1, jaw: 0.4 } },
+    tail: { dur: 1.6, caption: ['HSSSS', ''], expr: { browDown: 1, jaw: 0.5 } },
+    gun: { dur: 0.9, caption: ["DON'T TOUCH THE MERCHANDISE", ''], expr: { smile: 0.6 } },
+    feet: { dur: 0.6, caption: ['WATCH THE TOES', ''], expr: { eyeL: 0.6, eyeR: 0.6, jaw: 0.6, browUp: 1 } },
+    body: { dur: 0.5, caption: ['HANDS OFF', ''], expr: { browDown: 0.8 } },
+  };
+  let reaction = null;
+  const NOSE_SCALE = nose.scale.clone();
+
+  /** Start the reaction for a clicked part. Returns { caption, duration } for the UI. */
+  function react(part) {
+    const def = REACTIONS[part] ?? REACTIONS.body;
+    reaction = { part: REACTIONS[part] ? part : 'body', def, t: 0, sneezed: false };
+    return { caption: def.caption, duration: def.dur + 0.4 };
+  }
+
+  function animateReaction(dt) {
+    // Rest pose for everything a reaction might touch
+    head.scale.set(1, 1, 1);
+    head.rotation.x = 0;
+    nose.scale.copy(NOSE_SCALE);
+    ears.forEach((e) => (e.rotation.z = e.userData.baseRotZ));
+    torso.scale.x = torso.scale.z = 1;
+    torso.position.x = 0;
+    tail.scale.setScalar(1);
+    spinner.rotation.x = 0;
+    body.position.y = 0;
+    if (!reaction) return { overlay: null, amount: 0 };
+
+    reaction.t += dt;
+    const { part, def, t: rt } = reaction;
+    const p = rt / def.dur;
+    if (p >= 1) {
+      reaction = null;
+      return { overlay: null, amount: 0 };
+    }
+    const env = 1 - p; // fades out over the reaction
+
+    switch (part) {
+      case 'head': { // squash for a pat
+        const w = Math.sin(rt * 22) * env;
+        head.scale.set(1 + 0.07 * w, 1 - 0.12 * Math.abs(w), 1 + 0.07 * w);
+        break;
+      }
+      case 'nose': { // wind up, sneeze, accidental shot
+        const windUp = 0.45;
+        if (rt < windUp) {
+          const k = rt / windUp;
+          head.rotation.x = -0.35 * k;
+          nose.scale.copy(NOSE_SCALE).multiplyScalar(1 + 0.6 * k);
+        } else {
+          if (!reaction.sneezed) {
+            reaction.sneezed = true;
+            api.onSneeze?.();
+          }
+          head.rotation.x = 0.3 * Math.exp(-(rt - windUp) * 8) * Math.cos((rt - windUp) * 20);
+        }
+        break;
+      }
+      case 'earL':
+      case 'earR': { // flick that ear
+        const ear = ears[part === 'earL' ? 0 : 1];
+        ear.rotation.z = ear.userData.baseRotZ + Math.sin(rt * 45) * 0.6 * env;
+        break;
+      }
+      case 'belly': { // jiggle
+        const w = Math.sin(rt * 28) * 0.07 * env;
+        torso.scale.x = 1 + w;
+        torso.scale.z = 1 - w;
+        break;
+      }
+      case 'tail': // puff up and whip
+        tail.scale.setScalar(1 + 0.8 * Math.min(1, rt * 8) * env);
+        tail.rotation.y += Math.sin(rt * 30) * 0.5 * env;
+        break;
+      case 'gun': { // two trick spins around the trigger guard
+        const e = 1 - Math.pow(1 - p, 3);
+        spinner.rotation.x = -Math.PI * 4 * e;
+        break;
+      }
+      case 'feet': // hop
+        body.position.y = Math.sin(Math.PI * p) * 0.55;
+        break;
+      default: // flinch
+        torso.position.x = Math.sin(rt * 55) * 0.06 * env;
+    }
+    return { overlay: def.expr, amount: Math.min(1, env * 3) };
+  }
+
+  /** Which tagged body part (if any) a raycaster hits. */
+  function partAt(raycaster) {
+    for (const hit of raycaster.intersectObject(root, true)) {
+      for (let o = hit.object; o && o !== root; o = o.parent) {
+        if (o.userData.part) return o.userData.part;
+      }
+    }
+    return null;
+  }
+
   root.traverse((o) => { if (o.isMesh) o.castShadow = true; });
 
-  return { root, update, fire, setExpression, expr, height: 3.4, width: 2.4, minY: -1.15, muzzle };
+  const api = {
+    root, update, fire, setExpression, expr, react, partAt,
+    onSneeze: null, // set by main.js: what happens when a sneeze sets the gun off
+    height: 3.4, width: 2.4, minY: -1.15, muzzle,
+  };
+  return api;
 }
