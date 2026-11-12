@@ -7,6 +7,7 @@ import { OneEuroVec3 } from './filter.js';
 import { pew, unlockAudio } from './sfx.js';
 import { LevelSensor, detectDeviceKind, tiltFromFaceMatrix } from './level.js';
 import { CameraView } from './camView.js';
+import { createThirdPerson } from './thirdPerson.js';
 
 // World space = physical meters, origin at the centre of the screen,
 // +x right, +y up along the screen, +z out of the screen toward the viewer.
@@ -24,6 +25,7 @@ const ui = {
   introStatus: $('introStatus'),
   status: $('status'),
   camMode: $('camMode'),
+  viewBtn: $('viewBtn'),
   pip: $('pip'),
   video: $('video'),
   pipOverlay: $('pipOverlay'),
@@ -190,6 +192,7 @@ const tracker = new FaceTracker(ui.video, CONFIG);
 const eyeFilter = new OneEuroVec3(CONFIG.filter);
 
 window.addEventListener('pointermove', (e) => {
+  if (view === 'third' && e.buttons) return; // dragging the orbit camera, not aiming
   const nx = (e.clientX / window.innerWidth) * 2 - 1;
   const ny = -((e.clientY / window.innerHeight) * 2 - 1);
   pointerEye.set(nx * screen.w * 0.8, ny * screen.h * 0.8, CONFIG.defaultEyeDistance);
@@ -209,17 +212,51 @@ function fire() {
   shotsFired++;
 }
 let shotsFired = 0;
+// Window view: fire on press. Third-person view: fire on a click that wasn't an orbit drag.
+let pressAt = null;
 ui.canvas.addEventListener('pointerdown', (e) => {
   if (mode === 'idle') return;
+  if (view === 'third') {
+    pressAt = { x: e.clientX, y: e.clientY, t: performance.now() };
+    return;
+  }
   e.preventDefault();
   fire();
+});
+ui.canvas.addEventListener('pointerup', (e) => {
+  if (view !== 'third' || !pressAt || mode === 'idle') return;
+  const moved = Math.hypot(e.clientX - pressAt.x, e.clientY - pressAt.y);
+  if (moved < 6 && performance.now() - pressAt.t < 400) fire();
+  pressAt = null;
 });
 window.addEventListener('keydown', (e) => {
   if (e.code === 'Space' && mode !== 'idle') {
     e.preventDefault();
     fire();
   }
+  if (e.code === 'KeyV' && mode !== 'idle') setView(view === 'window' ? 'third' : 'window');
 });
+
+// ---------- view: window (head-coupled) or third person ----------
+let view = 'window';
+// The TV shows the mugshot, rendered unmirrored so it lines up with where the cat aims.
+const tvView = new CameraView({ video: ui.video, canvas: document.createElement('canvas'), mirror: false });
+tvView.setMode('mugshot');
+const third = createThirdPerson({ scene, canvas: ui.canvas, video: ui.video, tvCanvas: tvView.canvas });
+third.resize(window.innerWidth, window.innerHeight);
+window.addEventListener('resize', () => third.resize(window.innerWidth, window.innerHeight));
+const _catPos = new THREE.Vector3();
+
+function setView(v) {
+  view = v;
+  third.setActive(v === 'third');
+  ui.viewBtn.textContent = v === 'third' ? 'View: 3rd person' : 'View: window';
+  if (v === 'third') {
+    cat.root.getWorldPosition(_catPos);
+    third.frame(_catPos, eye);
+  }
+}
+ui.viewBtn.addEventListener('click', () => setView(view === 'window' ? 'third' : 'window'));
 
 // ---------- captions ----------
 function setCaption(top, bottom = '') {
@@ -239,6 +276,7 @@ function updateCaptions(t, faceVisible) {
 
 // ---------- camera preview (live / mugshot / tracking data) ----------
 const camView = new CameraView({ video: ui.video, canvas: ui.pipOverlay, container: ui.pip });
+camView.booking = tvView.booking; // same booking number on the preview and the TV
 ui.camMode.addEventListener('change', () => camView.setMode(ui.camMode.value));
 ui.camMode.addEventListener('pointerdown', (e) => e.stopPropagation());
 const drawPip = () => camView.draw(faceRaw, { lidTiltDeg: deviceKind === 'laptop' ? level.tiltDeg : null, lidSource: level.source });
@@ -287,6 +325,7 @@ ui.startBtn.addEventListener('click', async () => {
   unlockAudio();
   if (deviceKind === 'mobile') level.requestPermission(); // must start inside the tap on iOS
   ui.levelBtn.hidden = false;
+  ui.viewBtn.hidden = false;
   ui.startBtn.disabled = ui.mouseBtn.disabled = true;
   try {
     ui.introStatus.textContent = 'Asking for camera access…';
@@ -310,6 +349,7 @@ ui.mouseBtn.addEventListener('click', () => {
   unlockAudio();
   if (deviceKind === 'mobile') level.requestPermission();
   ui.levelBtn.hidden = false;
+  ui.viewBtn.hidden = false;
   mode = 'pointer';
   ui.intro.hidden = true;
 });
@@ -370,7 +410,21 @@ function frame() {
         ? 'mouse mode'
         : '';
 
-  renderer.render(scene, camera);
+  if (view === 'third') {
+    if (mode === 'face') tvView.draw(faceRaw);
+    third.update({
+      eye,
+      screen,
+      webcam: webcamOffset(),
+      fovDeg: CONFIG.cameraDiagonalFovDeg,
+      live: mode === 'face',
+      muzzleObj: cat.muzzle,
+    });
+    third.controls.update();
+    renderer.render(scene, third.camera);
+  } else {
+    renderer.render(scene, camera);
+  }
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
@@ -387,5 +441,6 @@ window.__cat = {
     ui.intro.hidden = true;
     ui.camMode.hidden = false;
     ui.levelBtn.hidden = false;
+    ui.viewBtn.hidden = false;
   },
 };

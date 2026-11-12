@@ -18,10 +18,18 @@ const FOREHEAD = 10;
 const DEG = 180 / Math.PI;
 
 export class CameraView {
-  constructor({ video, canvas, container }) {
+  /**
+   * @param {object} o
+   * @param {HTMLVideoElement} o.video
+   * @param {HTMLCanvasElement} o.canvas   where to draw
+   * @param {HTMLElement} [o.container]   preview box to show/hide and resize (optional)
+   * @param {boolean} [o.mirror]          selfie-mirror the picture (true for the on-screen preview)
+   */
+  constructor({ video, canvas, container = null, mirror = true }) {
     this.video = video;
     this.canvas = canvas;
     this.container = container;
+    this.mirror = mirror;
     this.ctx = canvas.getContext('2d', { willReadFrequently: true });
     this.mode = 'off';
     this.detections = [];
@@ -31,8 +39,8 @@ export class CameraView {
 
   setMode(mode) {
     this.mode = mode;
-    this.container.classList.toggle('collapsed', mode === 'off');
-    this.container.classList.toggle('large', mode === 'mugshot' || mode === 'data');
+    this.container?.classList.toggle('collapsed', mode === 'off');
+    this.container?.classList.toggle('large', mode === 'mugshot' || mode === 'data');
   }
 
   /** Call whenever the tracker produced a new result, to measure tracking FPS. */
@@ -51,17 +59,20 @@ export class CameraView {
     if (this.canvas.width !== W || this.canvas.height !== H) {
       this.canvas.width = W;
       this.canvas.height = H;
-      this.container.style.aspectRatio = `${W} / ${H}`;
+      if (this.container) this.container.style.aspectRatio = `${W} / ${H}`;
     }
     const ctx = this.ctx;
     ctx.save();
-    ctx.translate(W, 0);
-    ctx.scale(-1, 1);
+    if (this.mirror) {
+      ctx.translate(W, 0);
+      ctx.scale(-1, 1);
+    }
     ctx.drawImage(v, 0, 0, W, H);
     ctx.restore();
 
-    // Mirrored landmark -> canvas pixels
-    const P = face?.landmarks ? (i) => ({ x: (1 - face.landmarks[i].x) * W, y: face.landmarks[i].y * H }) : null;
+    // Landmark -> canvas pixels (text is always drawn unflipped, so it stays readable)
+    const m = this.mirror;
+    const P = face?.landmarks ? (i) => ({ x: (m ? 1 - face.landmarks[i].x : face.landmarks[i].x) * W, y: face.landmarks[i].y * H }) : null;
     const u = W / 360; // one "CSS-ish" pixel at the default preview size
 
     if (this.mode === 'live') this.#drawLive(P, u);
