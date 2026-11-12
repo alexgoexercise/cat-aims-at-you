@@ -17,6 +17,8 @@ const MAT = {
   white: toon(0xfff4e6),
   pink: toon(0xff9aa2),
   black: new THREE.MeshBasicMaterial({ color: 0x111111 }),
+  mouth: new THREE.MeshBasicMaterial({ color: 0x3a0f16 }),
+  lips: toon(0xe0566e),
   shine: new THREE.MeshBasicMaterial({ color: 0xffffff }),
   gun: toon(0x34343e),
   gunDark: toon(0x1a1a20),
@@ -50,9 +52,13 @@ function buildHead() {
     head.add(mesh(new THREE.BoxGeometry(0.06, 0.22, 0.05), MAT.stripe, { pos: [x, 0.52, 0.57], rot: [-0.8, 0, x * -1.5] }));
   }
 
-  // Eyes (each in a group so we can blink by squashing Y)
+  // Face rig. Index 0 of each pair is the cat's right side, which is on the
+  // left of the screen (the cat faces the viewer).
   const eyes = [];
+  const brows = [];
+  const cheeks = [];
   for (const s of [-1, 1]) {
+    // Eyes (each in a group so we can blink / wink by squashing Y)
     const eye = new THREE.Group();
     eye.position.set(0.32 * s, 0.1, 0.62);
     eye.add(mesh(sphere(0.22), MAT.white, { scale: [1, 1, 0.6] }));
@@ -62,10 +68,14 @@ function buildHead() {
     eyes.push(eye);
 
     // Angry eyebrows (inner end lower)
-    head.add(mesh(new THREE.BoxGeometry(0.34, 0.07, 0.08), MAT.stripe, { pos: [0.32 * s, 0.38, 0.72], rot: [0, 0, 0.35 * s] }));
+    const brow = mesh(new THREE.BoxGeometry(0.34, 0.07, 0.08), MAT.stripe, { pos: [0.32 * s, 0.38, 0.72], rot: [0, 0, 0.35 * s] });
+    head.add(brow);
+    brows.push(brow);
 
     // Cheeks / muzzle puffs
-    head.add(mesh(sphere(0.2), MAT.white, { pos: [0.14 * s, -0.24, 0.66], scale: [1, 0.8, 0.7] }));
+    const cheek = mesh(sphere(0.2), MAT.white, { pos: [0.14 * s, -0.24, 0.66], scale: [1, 0.8, 0.7] });
+    head.add(cheek);
+    cheeks.push(cheek);
 
     // Whiskers
     const pts = [];
@@ -75,11 +85,25 @@ function buildHead() {
     head.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0x222222 })));
   }
 
-  // Nose and grumpy mouth
+  // Nose
   head.add(mesh(sphere(0.07), MAT.pink, { pos: [0, -0.1, 0.82], scale: [1.3, 0.9, 0.8] }));
-  head.add(mesh(new THREE.TorusGeometry(0.08, 0.016, 8, 20, Math.PI), MAT.black, { pos: [0, -0.4, 0.74] }));
 
-  return { head, eyes };
+  // Mouth shapes, blended by the expression values
+  const arc = new THREE.TorusGeometry(0.08, 0.016, 8, 20, Math.PI);
+  const frown = mesh(arc, MAT.black, { pos: [0, -0.4, 0.74] }); // ∩
+  const smile = mesh(arc, MAT.black, { pos: [0, -0.36, 0.745], rot: [0, 0, Math.PI] }); // ∪
+  smile.scale.set(1.25, 1.1, 1);
+  const open = new THREE.Group(); // open mouth for yawns
+  open.position.set(0, -0.42, 0.68);
+  open.add(mesh(sphere(0.14), MAT.mouth, { scale: [1, 1, 0.4] }));
+  open.add(mesh(sphere(0.08), MAT.pink, { pos: [0, -0.07, 0.03], scale: [1.1, 0.5, 0.6] })); // tongue
+  const pucker = new THREE.Group(); // kiss "o": puckered lips around a dark centre
+  pucker.position.set(0, -0.38, 0.76);
+  pucker.add(mesh(new THREE.TorusGeometry(0.07, 0.035, 12, 28), MAT.lips));
+  pucker.add(mesh(new THREE.CircleGeometry(0.045, 20), MAT.mouth, { pos: [0, 0, 0.01] }));
+  head.add(frown, smile, open, pucker);
+
+  return { head, eyes, rig: { eyes, brows, cheeks, frown, smile, open, pucker } };
 }
 
 function buildGun() {
@@ -145,7 +169,7 @@ export function createCat() {
   // Head on a neck pivot
   const neck = new THREE.Group();
   neck.position.set(0, 1.0, 0);
-  const { head, eyes } = buildHead();
+  const { head, eyes, rig } = buildHead();
   head.position.y = 0.3;
   neck.add(head);
   torso.add(neck);
@@ -178,6 +202,62 @@ export function createCat() {
   let recoil = 0;
   let nextBlink = 2 + Math.random() * 3;
   let blinkT = 0;
+
+  // Expression state (0..1 each). eyeL/eyeR are the eyes on the left/right of the SCREEN.
+  const EXPR_KEYS = ['eyeL', 'eyeR', 'jaw', 'smile', 'browUp', 'browDown', 'puff', 'pucker'];
+  const expr = Object.fromEntries(EXPR_KEYS.map((k) => [k, 0]));
+  const exprTarget = { ...expr };
+  let faceDriven = false;
+
+  /** Copy a face: pass expression values (0..1), or null to go back to the default grumpy face. */
+  function setExpression(values) {
+    faceDriven = !!values;
+    for (const k of EXPR_KEYS) exprTarget[k] = values?.[k] ?? 0;
+  }
+
+  const show = (obj, amount) => {
+    obj.visible = amount > 0.02;
+    return obj.visible;
+  };
+
+  function applyExpression(dt, autoBlink) {
+    const a = 1 - Math.exp(-dt * 18);
+    for (const k of EXPR_KEYS) expr[k] += (exprTarget[k] - expr[k]) * a;
+    const { eyeL, eyeR, jaw, smile, browUp, browDown, puff, pucker } = expr;
+
+    // Eyes: blink/wink, plus a slight happy squint when smiling
+    [eyeL, eyeR].forEach((closed, i) => {
+      const c = Math.min(1, Math.max(closed, autoBlink) + smile * 0.25);
+      rig.eyes[i].scale.y = 1 - 0.9 * c;
+    });
+
+    // Brows: base angle is angry; raising relaxes them, frowning deepens them
+    rig.brows.forEach((b, i) => {
+      const s = i === 0 ? -1 : 1;
+      b.rotation.z = 0.35 * s * (1 - 1.3 * browUp - 0.7 * smile + 0.6 * browDown);
+      b.position.y = 0.38 + 0.1 * browUp - 0.05 * browDown;
+    });
+
+    // Cheeks puff out and lift with a smile
+    rig.cheeks.forEach((c) => {
+      const k = 1 + 0.8 * puff;
+      c.scale.set(k, 0.8 * k, 0.7 + 0.9 * puff);
+      c.position.y = -0.24 + 0.05 * smile;
+    });
+
+    // Mouth: open (yawn) > pucker (kiss) > smile > default frown
+    const open = Math.min(1, jaw);
+    const kiss = pucker * (1 - open);
+    const grin = smile * (1 - open) * (1 - kiss);
+    if (show(rig.open, open)) {
+      rig.open.scale.set(1 + 0.2 * open, 0.15 + 1.3 * open, 1);
+      rig.open.position.y = -0.42 - 0.05 * open;
+    }
+    if (show(rig.pucker, kiss)) rig.pucker.scale.setScalar(kiss);
+    if (show(rig.smile, grin)) rig.smile.scale.set(1.25 * grin, 1.1 * grin, 1);
+    const sulk = 1 - Math.max(open, kiss, grin);
+    if (show(rig.frown, sulk)) rig.frown.scale.setScalar(sulk);
+  }
 
   function smoothLookAt(obj, target, alpha) {
     tmpQ.copy(obj.quaternion);
@@ -223,11 +303,11 @@ export function createCat() {
     // Tail sway and blinking
     tail.rotation.z = Math.sin(t * 1.6) * 0.15;
     tail.rotation.y = Math.sin(t * 1.1) * 0.2;
+    // The cat blinks on its own only when it isn't copying your face.
     nextBlink -= dt;
     if (nextBlink <= 0) { blinkT = 0.14; nextBlink = 2 + Math.random() * 4; }
     blinkT = Math.max(0, blinkT - dt);
-    const lid = blinkT > 0 ? 0.1 : 1;
-    eyes.forEach((e) => (e.scale.y = lid));
+    applyExpression(dt, !faceDriven && blinkT > 0 ? 1 : 0);
   }
 
   function fire() {
@@ -236,5 +316,5 @@ export function createCat() {
 
   root.traverse((o) => { if (o.isMesh) o.castShadow = true; });
 
-  return { root, update, fire, height: 3.4, width: 2.4, minY: -1.15, muzzle };
+  return { root, update, fire, setExpression, expr, height: 3.4, width: 2.4, minY: -1.15, muzzle };
 }

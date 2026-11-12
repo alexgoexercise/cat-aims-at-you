@@ -17,6 +17,7 @@ A 3D cartoon cat that tracks your face through the front camera and keeps its gu
 
 - **Face tracking** – MediaPipe Face Landmarker estimates where your eyes are in 3D, in meters.
 - **Window effect** – head-coupled perspective makes the screen behave like a window into a small room.
+- **Copies your face** – winks, yawns, smiles, raised or lowered brows, puffed cheeks and kiss faces are mirrored on the cat, with a meme caption for some (`src/mimic.js`).
 - **Level floor** – the room's floor stays horizontal in the real world: at keyboard height on laptops, and level with the horizon on phones.
 - **Private** – runs entirely in the browser. Video never leaves the device.
 - **No build step** – plain HTML and ES modules, with Three.js and MediaPipe loaded from a CDN.

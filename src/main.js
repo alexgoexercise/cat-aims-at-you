@@ -9,6 +9,7 @@ import { LevelSensor, detectDeviceKind, tiltFromFaceMatrix } from './level.js';
 import { CameraView } from './camView.js';
 import { createThirdPerson } from './thirdPerson.js';
 import { BlinkDetector } from './blink.js';
+import { faceToCatExpression, reactionCaption } from './mimic.js';
 
 // World space = physical meters, origin at the centre of the screen,
 // +x right, +y up along the screen, +z out of the screen toward the viewer.
@@ -217,6 +218,7 @@ let shotsFired = 0;
 // With the camera on, the cat fires when you blink (see the main loop).
 // Mouse mode keeps click / tap / space.
 const blink = new BlinkDetector();
+let faceExpr = null; // latest face expression mapped for the cat (see mimic.js)
 // Window view: fire on press. Third-person view: fire on a click that wasn't an orbit drag.
 let pressAt = null;
 ui.canvas.addEventListener('pointerdown', (e) => {
@@ -274,6 +276,8 @@ function updateCaptions(t, faceVisible) {
   if (mode === 'face' && !faceVisible) return setCaption("WHERE'D YOU GO", 'I KNOW YOU\'RE THERE');
   if (eye.z < 0.25) return setCaption('BACK UP', 'PERSONAL SPACE PLEASE');
   if (speed > 0.35) return setCaption("I SAID DON'T MOVE");
+  const reaction = faceVisible ? reactionCaption(cat.expr) : null;
+  if (reaction) return setCaption(...reaction);
   if (camView.mode === 'mugshot') return setCaption('SUSPECT IDENTIFIED', 'HANDS WHERE I CAN SEE THEM');
   if (shotsFired > 0 && t % 8 < 2) return setCaption('THAT WAS A WARNING SHOT');
   setCaption("DON'T MOVE", mode === 'pointer' ? 'MOUSE MODE' : '');
@@ -371,6 +375,7 @@ function frame() {
     faceRaw = tracker.face;
     camView.noteDetection(now);
     if (faceRaw && blink.update(faceRaw.blendshapes, now)) fire();
+    faceExpr = faceRaw ? faceToCatExpression(faceRaw.blendshapes) : null;
     if (faceRaw) {
       const off = webcamOffset();
       eyeFilter.filter(faceRaw.x + off.x, faceRaw.y + off.y, faceRaw.z, now, eye);
@@ -395,6 +400,8 @@ function frame() {
   const prevSource = level.source;
   layoutWorld(level.update(dt));
   updateCamera(CONFIG.headCoupledPerspective && mode !== 'pointer' ? eye : defaultEye);
+  // The cat copies your face while it can see you; otherwise it goes back to grumpy.
+  cat.setExpression(faceVisible ? faceExpr : null);
   cat.update(dt, t, eye);
   updateCaptions(t, faceVisible);
   drawPip();
@@ -440,7 +447,7 @@ requestAnimationFrame(frame);
 
 // Handy for debugging in the console
 window.__cat = {
-  CONFIG, eye, screen, tracker, level, gravity, deviceKind, camView,
+  CONFIG, eye, screen, tracker, level, gravity, deviceKind, camView, cat,
   /** Debug: run face tracking on any MediaStream (e.g. a canvas) instead of the webcam. */
   async useStream(stream) {
     ui.video.srcObject = stream;
