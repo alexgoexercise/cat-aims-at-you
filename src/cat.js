@@ -204,7 +204,8 @@ export function createCat() {
   let blinkT = 0;
 
   // Expression state (0..1 each). eyeL/eyeR are the eyes on the left/right of the SCREEN.
-  const EXPR_KEYS = ['eyeL', 'eyeR', 'jaw', 'smile', 'browUp', 'browDown', 'puff', 'pucker'];
+  // `roll` is in radians: the head tilt about the cat's forward axis.
+  const EXPR_KEYS = ['eyeL', 'eyeR', 'jaw', 'smile', 'browUp', 'browDown', 'puff', 'pucker', 'roll'];
   const expr = Object.fromEntries(EXPR_KEYS.map((k) => [k, 0]));
   const exprTarget = { ...expr };
   let faceDriven = false;
@@ -223,7 +224,10 @@ export function createCat() {
   function applyExpression(dt, autoBlink) {
     const a = 1 - Math.exp(-dt * 18);
     for (const k of EXPR_KEYS) expr[k] += (exprTarget[k] - expr[k]) * a;
-    const { eyeL, eyeR, jaw, smile, browUp, browDown, puff, pucker } = expr;
+    const { eyeL, eyeR, jaw, smile, browUp, browDown, puff, pucker, roll } = expr;
+
+    // Head tilt (roll), on top of the neck that keeps the face pointed at you
+    head.rotation.z = roll;
 
     // Eyes: blink/wink, plus a slight happy squint when smiling
     [eyeL, eyeR].forEach((closed, i) => {

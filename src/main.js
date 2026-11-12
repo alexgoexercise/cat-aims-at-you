@@ -375,7 +375,7 @@ function frame() {
     faceRaw = tracker.face;
     camView.noteDetection(now);
     if (faceRaw && blink.update(faceRaw.blendshapes, now)) fire();
-    faceExpr = faceRaw ? faceToCatExpression(faceRaw.blendshapes) : null;
+    faceExpr = faceRaw ? faceToCatExpression(faceRaw.blendshapes, faceRaw.poseMatrix) : null;
     if (faceRaw) {
       const off = webcamOffset();
       eyeFilter.filter(faceRaw.x + off.x, faceRaw.y + off.y, faceRaw.z, now, eye);
