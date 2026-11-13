@@ -4,6 +4,12 @@ A 3D cartoon cat that tracks your face through the front camera and keeps its gu
 
 **Live:** https://alexgoexercise.github.io/cat-aims-at-you/
 
+## Demo
+
+[![Watch the 55-second demo (English and Chinese captions)](docs/demo-poster.jpg)](docs/demo.mp4)
+
+55 seconds, with English and Chinese captions. [Download the MP4](docs/demo.mp4).
+
 <p>
   <img src="docs/aim.jpg" alt="The cat aiming its gun, standing in a neon room" width="49%" />
   <img src="docs/fire.jpg" alt="Muzzle flash when firing" width="49%" />
@@ -57,6 +63,18 @@ URL parameters, with defaults in `src/config.js`:
 | `dist` | `0.55` / `0.35` | Viewing distance in meters when no face is tracked |
 | `tilt` | auto | Laptop lid tilt in degrees from vertical |
 | `parallax` | `1` | `0` turns off the window effect |
+
+## Rebuilding the demo video
+
+The demo is recorded from the real site and assembled with ffmpeg. The music is generated in code, so there are no audio assets. You need Chrome, Node 22+, Python 3 with numpy, and ffmpeg built with libass.
+
+```bash
+python3 -m http.server 5174 &
+node tools/demo-video/record.mjs      # headless Chrome runs tools/demo-video/timeline.js and saves frames
+python3 tools/demo-video/build.py     # captions + music -> tools/demo-video/out/cat-aims-at-you-demo.mp4
+```
+
+Edit the scene script in `timeline.js`, the captions in `build.py`, and the music in `music.py`.
 
 ## Deploy
 

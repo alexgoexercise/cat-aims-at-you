@@ -236,16 +236,20 @@ function partUnder(e) {
   return cat.partAt(raycaster);
 }
 
+function poke(part) {
+  const { caption, duration } = cat.react(part);
+  reactionCaption_ = caption;
+  reactionUntil = performance.now() + duration * 1000;
+}
+
 function handleClick(e) {
   const part = partUnder(e);
-  if (part) {
-    const { caption, duration } = cat.react(part);
-    reactionCaption_ = caption;
-    reactionUntil = performance.now() + duration * 1000;
-  } else if (mode === 'pointer') {
-    fire();
-  }
+  if (part) poke(part);
+  else if (mode === 'pointer') fire();
 }
+
+// Scripted eye position (used for recording demos); null = normal input.
+let demoEye = null;
 
 // Window view: act on press. Third-person view: act on a click that wasn't an orbit drag.
 let pressAt = null;
@@ -426,6 +430,7 @@ function frame() {
   } else if (!faceVisible) {
     eye.lerp(defaultEye, 1 - Math.exp(-dt * 1.5));
   }
+  if (demoEye) eye.copy(demoEye);
 
   const instSpeed = eye.distanceTo(prevEye) / Math.max(dt, 1e-3);
   speed += (instSpeed - speed) * (1 - Math.exp(-dt * 4));
@@ -433,7 +438,7 @@ function frame() {
 
   const prevSource = level.source;
   layoutWorld(level.update(dt));
-  updateCamera(CONFIG.headCoupledPerspective && mode !== 'pointer' ? eye : defaultEye);
+  updateCamera(CONFIG.headCoupledPerspective && (mode !== 'pointer' || demoEye) ? eye : defaultEye);
   // The cat copies your face while it can see you; otherwise it goes back to grumpy.
   cat.setExpression(faceVisible ? faceExpr : null);
   cat.update(dt, t, eye);
@@ -481,7 +486,13 @@ requestAnimationFrame(frame);
 
 // Handy for debugging in the console
 window.__cat = {
-  CONFIG, eye, screen, tracker, level, gravity, deviceKind, camView, cat,
+  CONFIG, eye, screen, tracker, level, gravity, deviceKind, camView, cat, third,
+  // Hooks for scripted demos / recordings
+  fire, poke, setView,
+  /** Drive the viewer's eye position directly ({x, y, z} in meters), or null to stop. */
+  driveEye(v) {
+    demoEye = v ? (demoEye ?? new THREE.Vector3()).set(v.x, v.y, v.z) : null;
+  },
   /** Debug: run face tracking on any MediaStream (e.g. a canvas) instead of the webcam. */
   async useStream(stream) {
     ui.video.srcObject = stream;
